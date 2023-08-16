@@ -234,14 +234,14 @@ def main():
 
     if args.conditioning is not None:
         if os.path.splitext(args.conditioning)[1] == ".pt":
-            print("Loading conditioning latents...")
+            print(f"Loading conditioning latents: {args.conditioning}")
             cond_latents = torch.load(args.conditioning)
         else:
             if args.rave_conditioning is None:
                 cond_encoder = rave
             else:
                 cond_encoder = torch.jit.load(args.rave_conditioning).to(device)
-            print("Encoding conditioning audiofile...")
+            print(f"Encoding conditioning audiofile: {args.conditioning}")
             cond_latents = encode_audiofile(cond_encoder, args.conditioning)
 
         cond_latents = torch.nn.functional.pad(
