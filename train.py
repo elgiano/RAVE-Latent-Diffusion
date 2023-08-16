@@ -15,7 +15,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from audio_diffusion_pytorch import DiffusionModel, UNetV0, VDiffusion, VSampler
 
-from rave_conditioning import RAVEConditioningModel, RaveConditioningDataset, load_cond_datasets
+from rave_conditioning import RAVEConditioningModel, load_cond_datasets
 
 if torch.cuda.is_available():
     device = torch.device("cuda:0")
@@ -35,7 +35,7 @@ class RaveDataset(Dataset):
             z = torch.from_numpy(z).float().squeeze()
             self.latent_data.append(z)
 
-        self.latent_size = self.latent_data[0].shape[0]
+        self.latent_dims = self.latent_data[0].shape[0]
         self.num_latents = self.latent_data[0].shape[-1]
 
     def __len__(self):
@@ -98,6 +98,7 @@ def set_seed(seed=664):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+
 def resume_from_checkpoint(checkpoint_path, model, optimizer, scheduler):
     if checkpoint_path is not None:
         checkpoint = torch.load(checkpoint_path)
@@ -113,6 +114,7 @@ def resume_from_checkpoint(checkpoint_path, model, optimizer, scheduler):
         start_epoch = 0
 
     return start_epoch
+
 
 def main():
     # Parse command-line arguments
@@ -132,16 +134,15 @@ def main():
 
     os.makedirs(args.save_out_path, exist_ok=True)
 
-    latent_files = [f for f in os.listdir(latent_folder) if f.endswith(".npy")]
-
     set_seed(664)
 
     if not args.cond_latent_folder:
-        train_dataset, val_dataset, num_train_files, num_val_files = load_dataset(latent_folder, split_ratio)
+        res = load_dataset(latent_folder, split_ratio)
+        train_dataset, val_dataset, num_train_files, num_val_files = res
 
         model = DiffusionModel(
             net_t=UNetV0,
-            in_channels=train_dataset.rave_dims,
+            in_channels=train_dataset.latent_dims,
             channels=[256, 256, 256, 256, 512, 512, 512, 768, 768],
             factors=[1, 4, 4, 4, 2, 2, 2, 2, 2],
             items=[1, 2, 2, 2, 2, 2, 2, 4, 4],
@@ -152,14 +153,17 @@ def main():
             sampler_t=VSampler,
         )
     else:
-        train_dataset, val_dataset, num_train_files, num_val_files = load_cond_dataset(latent_folder, args.cond_latent_folder, split_ratio)
-        model = RaveConditioningModel(in_channels=train_dataset.rave_dims,
-                                      embedding_features=train_dataset.num_latents)
+        res = load_cond_datasets(latent_folder, args.cond_latent_folder, split_ratio)
+        train_dataset, val_dataset, num_train_files, num_val_files = res
+        model = RAVEConditioningModel(in_channels=train_dataset.latent_dims,
+                                      embedding_features=train_dataset.cond_latent_dims)
 
     model = model.to(device)
 
-    train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-    val_data_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
+    train_data_loader = DataLoader(train_dataset, batch_size=batch_size,
+                                   shuffle=True, num_workers=8, pin_memory=True)
+    val_data_loader = DataLoader(val_dataset, batch_size=batch_size,
+                                 shuffle=False, num_workers=8, pin_memory=True)
 
     print("Model Architecture:")
     print(model)
@@ -172,7 +176,7 @@ def main():
     print("Training:", num_train_files, "files")
     print("Validation:", num_val_files, "files")
 
-    if checkpoint_path != None:
+    if checkpoint_path is not None:
         print(f"Resuming training from: {checkpoint_path}\n")
 
     if not args.finetune:
@@ -213,8 +217,6 @@ def main():
 
         train_loss /= len(train_data_loader)
         print(f"Epoch {i+1}, train loss: {train_loss}")
-
-        random.shuffle(train_dataset.latent_files)
 
         with torch.no_grad():
             model.eval()
@@ -266,6 +268,7 @@ def main():
                 torch.save(checkpoint, f"{save_out_path}/{args.name}_epoch{i}.pt")
 
             scheduler.step()
+
 
 if __name__ == '__main__':
     mp.set_start_method('spawn')

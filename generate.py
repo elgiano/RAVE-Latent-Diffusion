@@ -12,7 +12,7 @@ import numpy as np
 import random
 import soundfile as sf
 from audio_diffusion_pytorch import DiffusionModel, UNetV0, VDiffusion, VSampler
-from rave_conditioning import RaveConditioningModel
+from rave_conditioning import RAVEConditioningModel
 
 torch._C._jit_set_profiling_mode(False)
 torch._C._jit_set_profiling_executor(False)
@@ -224,7 +224,7 @@ def main():
         )
     else:
         # todo: read embedding_features
-        model = RaveConditioningModel(in_channels=rave_dims,
+        model = RAVEConditioningModel(in_channels=rave_dims,
                                       embedding_features=args.latent_length)
 
     model = model.to(device)

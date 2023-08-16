@@ -35,7 +35,7 @@ def RAVEConditioningPlugin(
     return Net
 
 
-class RaveConditioningDataset(Dataset):
+class RAVEConditioningDataset(Dataset):
     def __init__(self, latent_files, conditioning_files):
         self.latent_data = []
         self.conditioning = bool(conditioning_files)
@@ -51,8 +51,8 @@ class RaveConditioningDataset(Dataset):
             z = torch.from_numpy(z).float().squeeze()
             self.conditioning_data.append(z)
 
-        self.latent_size = self.latent_data[0].shape[0]
-        self.cond_latent_size = self.conditioning_data[0].shape[0]
+        self.latent_dims = self.latent_data[0].shape[0]
+        self.cond_latent_dims = self.conditioning_data[0].shape[0]
         self.num_latents = self.latent_data[0].shape[-1]
 
     def __len__(self):
@@ -65,7 +65,7 @@ class RaveConditioningDataset(Dataset):
             return self.latent_data[index]
 
 
-def RaveConditioningModel(in_channels, embedding_features):
+def RAVEConditioningModel(in_channels, embedding_features):
     return DiffusionModel(
         net_t=RAVEConditioningPlugin(UNetV0),
         in_channels=in_channels,
@@ -103,7 +103,7 @@ def load_cond_datasets(latent_folder, cond_folder, split_ratio):
     latent_files, cond_files = shuffle_unison(latent_files, cond_files)
 
     num_train = int(len(latent_files) * split_ratio)
-    train_dataset = RaveConditioningDataset(latent_files[:num_train], cond_files[:num_train])
-    val_dataset = RaveConditioningDataset(latent_files[num_train:], cond_files[num_train:])
+    train_dataset = RAVEConditioningDataset(latent_files[:num_train], cond_files[:num_train])
+    val_dataset = RAVEConditioningDataset(latent_files[num_train:], cond_files[num_train:])
 
     return train_dataset, val_dataset, num_train, len(latent_files) - num_train
