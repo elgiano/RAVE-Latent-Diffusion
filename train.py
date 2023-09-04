@@ -15,14 +15,23 @@ import numpy as np
 import random
 
 from raveld.model import LightningDiffusionModel, RAVELDModel, RAVELDConditioningModel
-from raveld.dataset import load_dataset, load_cond_datasets, load_self_cond_datasets
+from raveld.utils import read_latent_folder
 
-current_date = datetime.date.today()
+
+class RaveDataset(torch.utils.data.Dataset):
+    def __init__(self, latent_data):
+        self.latent_data = latent_data
+
+    def __len__(self):
+        return len(self.latent_data)
+
+    def __getitem__(self, index):
+        return self.latent_data[index]
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a model with a new dataset.")
-    parser.add_argument("--name", type=str, default=f"run_{current_date}",
+    parser.add_argument("--name", type=str, default=f"run_{datetime.date.today()}",
                         help="Name of your training run.")
     parser.add_argument("--latent_folder", type=str, default="./latents/",
                         help="Path to the directory containing the latent files.")
@@ -35,6 +44,8 @@ def parse_args():
                         help="Path to the directory where the model checkpoints will be saved.")
     parser.add_argument("--split_ratio", type=float, default=0.8,
                         help="Ratio for splitting the dataset into training and validation sets.")
+    parser.add_argument("--split_files", action="store_true",
+                        help="Split files for validation. Otherwise, split latents within files (default)")
     parser.add_argument("--max_epochs", type=int, default=25000,
                         help="Maximum epochs to train model.")
     parser.add_argument("--scheduler_steps", type=int, default=100,
@@ -58,6 +69,24 @@ def parse_args():
     return parser.parse_args()
 
 
+def split_train_val(latent_data, split_ratio, split_files):
+    train_data, val_data = ([], [])
+    if split_files:
+        random.shuffle(latent_data)
+        num_train = int(len(latent_data) * split_ratio)
+        for z in latent_data[:num_train]:
+            train_data += z
+        for z in latent_data[num_train:]:
+            val_data += z
+    else:
+        for z in latent_data:
+            random.shuffle(z)
+            num_train = int(len(z) * split_ratio)
+            train_data += z[:num_train]
+            val_data += z[num_train:]
+    return train_data, val_data
+
+
 def set_seed(seed=664):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -74,47 +103,67 @@ def main():
     checkpoint_path = args.checkpoint_path
     save_out_path = args.save_out_path
     split_ratio = args.split_ratio
+    split_files = args.split_files
     batch_size = args.batch_size
     num_workers = args.workers
 
     set_seed(664)
 
-    conditioning = args.self_conditioning or args.cond_latent_folder
+    cond_folder = args.cond_latent_folder
+    self_cond = args.self_conditioning
+    conditioning = self_cond or cond_folder
 
     # load datasets
+    latent_data = read_latent_folder(latent_folder, latent_length)
+    print(f"Read {len(latent_data)} latent files in {latent_folder}")
+    latent_dims = latent_data[0][0].shape[0]
 
-    if not conditioning:
-        res = load_dataset(latent_folder, latent_length, split_ratio)
-        train_dataset, val_dataset = res
-    else:
-        if args.self_conditioning:
-            res = load_self_cond_datasets(latent_folder,
-                                          latent_length, split_ratio)
-        else:
-            res = load_cond_datasets(latent_folder, args.cond_latent_folder,
-                                     latent_length, split_ratio)
-        train_dataset, val_dataset = res
+    if conditioning:
+        if cond_folder:
+            # read conditioning data
+            cond_data = read_latent_folder(cond_folder, latent_length)
+            print(f"Read {len(cond_data)} conditioning latent files in {cond_folder}")
+        elif args.self_conditioning:
+            # cond_data is shifted latents
+            cond_data = [(torch.zeros_like(z[0]),) + z[:-1] for z in latent_data]
+        # zip (x,c) for each window for each file
+        latent_data = [list(zip(x, c)) for x, c in zip(latent_data, cond_data)]
+
+    # split train-val
+    train_data, val_data = split_train_val(latent_data, split_ratio, split_files)
+    train_dataset = RaveDataset(tuple(train_data))
+    val_dataset = RaveDataset(tuple(val_data))
 
     train_data_loader = DataLoader(train_dataset, batch_size, shuffle=True,
                                    num_workers=num_workers, pin_memory=True)
     val_data_loader = DataLoader(val_dataset, batch_size, shuffle=False,
                                  num_workers=num_workers, pin_memory=True)
 
-    print(f"Training: {train_dataset.num_files} files, {len(train_dataset)} sequences")
-    print(f"Validation: {val_dataset.num_files} files, {len(val_dataset)} sequences")
+    print(f"Training: {len(train_dataset)} sequences")
+    print(f"Validation: {len(val_dataset)} sequences")
 
     # make model
 
     if checkpoint_path is not None:
         print(f"Resuming training from: {checkpoint_path}\n")
         model = LightningDiffusionModel.load_from_checkpoint(checkpoint_path)
-    elif conditioning:
-        model = RAVELDConditioningModel(train_dataset.latent_dims, train_dataset.latent_length)
-    else:
-        model = RAVELDModel(train_dataset.latent_dims, train_dataset.latent_length)
 
-    # print("Model Architecture:")
-    # print(model)
+        # is checkpoint compatible with dataset?
+        msg = f"checkpoint latent_dims ({model.latent_dims}) doesn't match dataset ({latent_dims})"
+        assert model.latent_dims == latent_dims, msg
+        msg = f"checkpoint latent_length ({model.latent_length}) doesn't match dataset ({latent_length})"
+        assert model.latent_length == latent_length, msg
+        if conditioning:
+            msg = f"checkpoint embedding_features ({model.embedding_features}) doesn't match dataset ({latent_length})"
+            assert model.embedding_features == latent_length, msg
+        else:
+            msg = "checkpoint had conditioning, but no training conditioning is provided"
+            assert model.embedding_features is None, msg
+
+    elif conditioning:
+        model = RAVELDConditioningModel(latent_dims, latent_length)
+    else:
+        model = RAVELDModel(latent_dims, latent_length)
 
     # config training
 
