@@ -11,7 +11,8 @@ import torch
 import numpy as np
 import random
 import soundfile as sf
-from raveld.model import LightningDiffusionModel
+from raveld.model import LightningDiffusionModel, RAVELDConditioningModel, RAVELDModel
+from raveld.utils import zeropad_to_multiple
 
 torch._C._jit_set_profiling_mode(False)
 torch._C._jit_set_profiling_executor(False)
@@ -35,6 +36,7 @@ def parse_args():
     parser.add_argument("--sample_rate", type=int, default=None, choices=[44100, 48000], help="Sample rate for generated audio. Should match samplerate of RAVE model.")
     parser.add_argument("--diffusion_steps", type=int, default=100, help="Number of steps for denoising diffusion.")
     parser.add_argument("--seed", type=int, default=random.randint(0,2**31-1), help="Random seed for generation.")
+    parser.add_argument("--latent_length", type=int, default=2048, help="latent_length the model was trained with")
     parser.add_argument("--length_mult", type=int, default=1, help="Multiply the duration of output by default model window.")
     parser.add_argument("--output_path", type=str, default="./", help="Path to the output audio file.")
     parser.add_argument("--num", type=int, default=1, help="Number of audio to generate.")
@@ -46,6 +48,7 @@ def parse_args():
     parser.add_argument("--temperature", type=float, default=1.0, help="Temperature of the random noise before diffusion.")
     parser.add_argument("--conditioning", type=str, help="Audio or .pt latents file for conditioning")
     parser.add_argument("--rave_conditioning", type=str, help="RAVE model to encode the conditioning file. Defaults to --rave_model")
+    parser.add_argument("--regenerate", type=str, help="Audio file to regenerate")
     return parser.parse_args()
 
 
@@ -56,13 +59,16 @@ def slerp(val, low, high):
     return res
 
 
+def set_seed(seed):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+
 # Generate the audio using the provided models and settings.
 def generate_audio(model, rave, args, seed):
     with torch.no_grad():
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
-
+        set_seed(seed)
         rave_dims = get_latent_dim(rave)
         z_length = model.latent_length * args.length_mult
 
@@ -97,7 +103,7 @@ def generate_audio(model, rave, args, seed):
 # Generate audio by slerping between two diffusion generated RAVE latents.
 def interpolate_seeds(model, rave, args, seed):
     with torch.no_grad():
-        torch.manual_seed(seed)
+        set_seed(seed)
 
         z_length = model.latent_length * args.length_mult
 
@@ -143,11 +149,44 @@ def encode_audiofile(encoder, audiofile_path):
     return cond_latents
 
 
+def regenerate_audio(model, rave, latents, args, seed):
+    with torch.no_grad():
+        set_seed(seed)
+
+        noise = torch.rand_like(latents) * args.temperature
+        latents = latents * (1 - args.temperature)
+        noise = noise * args.temperature + latents * (1 - args.temperature)
+        noise = noise.to(device)
+
+        rave_model_name = os.path.basename(args.rave_model).split(".")[0]
+        diffusion_model_name = os.path.basename(args.model_path)
+
+        print(f"Regenerating {noise.shape} latent codes with Diffusion model:", diffusion_model_name)
+        print("Decoding using RAVE Model:", rave_model_name)
+        print("Seed:", seed)
+
+        model.eval()
+
+        ### GENERATING WITH .PT FILE
+        diff = model.sample(noise, num_steps=args.diffusion_steps, show_progress=True)
+        # diff = model(noise)
+        # noise = diff
+
+        diff = (diff - diff.mean()) / diff.std()
+
+        rave = rave.cpu()
+        diff = diff.cpu()
+        print("Decoding using RAVE Model...")
+        y = decode_latents(diff, rave)
+        fname = f"rave-latent-diffusion_seed{seed}_{args.name}_{os.path.basename(args.regenerate)}.wav"
+        path = os.path.join(args.output_path, fname)
+        print(f"Writing {path}")
+        sf.write(path, y, args.sample_rate)
+
+
 def generate_audio_conditioning(model, rave, cond_latents, args, seed):
     with torch.no_grad():
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
+        set_seed(seed)
 
         # rave_dims = get_latent_dim(rave)
         noise = torch.randn_like(cond_latents)
@@ -194,6 +233,40 @@ def decode_latents(latents, rave):
     return y
 
 
+def load_model(rave, args, device):
+    try:
+        model = LightningDiffusionModel.load_from_checkpoint(args.model_path)
+    except KeyError:
+        print("Can't load lightning model, trying to load model_state_dict")
+        ckpt = torch.load(args.model_path, map_location=device)
+        latent_dims = get_latent_dim(rave)
+        if args.conditioning:
+            model = RAVELDConditioningModel(latent_dims, args.latent_length)
+        else:
+            model = RAVELDModel(latent_dims, args.latent_length)
+
+        model.load_state_dict(ckpt["model_state_dict"])
+
+    return model.to(device)
+
+
+def load_latents_or_encode(path, cond_encoder, device):
+    if os.path.splitext(path)[1] == ".pt":
+        print(f"Loading conditioning latents: {path}")
+        return torch.load(path, map_location=device)
+    else:
+        if cond_encoder is str:
+            cond_encoder = torch.jit.load(path).to(device)
+        print(f"Encoding conditioning audiofile: {path}")
+        return encode_audiofile(cond_encoder, path)
+
+
+def reshape_latents_for_model(z, model):
+    return zeropad_to_multiple(
+        z, model.latent_length
+    ).reshape((-1, z.size(1), model.latent_length))
+
+
 # Main function sets up the models and generates the audio.
 def main():
     args = parse_args()
@@ -205,36 +278,32 @@ def main():
         assert hasattr(rave, "sr"), msg
         args.sample_rate = rave.sr
 
-    model = LightningDiffusionModel.load_from_checkpoint(args.model_path)
-    model = model.to(device)
+    model = load_model(rave, args, device)
 
     if args.conditioning is not None:
-        if os.path.splitext(args.conditioning)[1] == ".pt":
-            print(f"Loading conditioning latents: {args.conditioning}")
-            cond_latents = torch.load(args.conditioning)
-        else:
-            if args.rave_conditioning is None:
-                cond_encoder = rave
-            else:
-                cond_encoder = torch.jit.load(args.rave_conditioning).to(device)
-            print(f"Encoding conditioning audiofile: {args.conditioning}")
-            cond_latents = encode_audiofile(cond_encoder, args.conditioning)
+        cond_latents = load_latents_or_encode(args.conditioning,
+                                              args.rave_conditioning or rave,
+                                              device)
 
-        cond_latents = torch.nn.functional.pad(
-            cond_latents, (0, -cond_latents.size(-1) % model.latent_length)
-        ).reshape((-1, cond_latents.size(1), model.latent_length))
+        cond_latents = reshape_latents_for_model(cond_latents, model)
 
         for i in range(args.num):
             seed = args.seed + i
             generate_audio_conditioning(model, rave, cond_latents, args, seed)
-    elif not args.lerp:
+    elif args.regenerate:
+        latents = load_latents_or_encode(args.regenerate, rave, device)
+        latents = reshape_latents_for_model(latents, model)
         for i in range(args.num):
             seed = args.seed + i
-            generate_audio(model, rave, args, seed)
-    else:
+            regenerate_audio(model, rave, latents, args, seed)
+    elif args.lerp:
         for i in range(args.num):
             seed = args.seed + i
             interpolate_seeds(model, rave, args, seed)
+    else:
+        for i in range(args.num):
+            seed = args.seed + i
+            generate_audio(model, rave, args, seed)
 
 if __name__ == "__main__":
     main()

@@ -5,7 +5,6 @@
 #### Year: 2023
 
 import torch
-import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 import GPUtil as gpu
@@ -15,8 +14,7 @@ import datetime
 import numpy as np
 import random
 
-from audio_diffusion_pytorch import UNetV0, VDiffusion, VSampler
-from raveld.model import LightningDiffusionModel
+from raveld.model import LightningDiffusionModel, RAVELDModel, RAVELDConditioningModel
 from raveld.dataset import load_dataset, load_cond_datasets, load_self_cond_datasets
 
 current_date = datetime.date.today()
@@ -111,36 +109,9 @@ def main():
         print(f"Resuming training from: {checkpoint_path}\n")
         model = LightningDiffusionModel.load_from_checkpoint(checkpoint_path)
     elif conditioning:
-        model = LightningDiffusionModel(net_t=UNetV0,
-                                        in_channels=train_dataset.latent_dims,
-                                        channels=[256, 256, 256, 256, 512, 512, 512, 768, 768],
-                                        factors=[1, 4, 4, 4, 2, 2, 2, 2, 2],
-                                        items=[1, 2, 2, 2, 2, 2, 2, 4, 4],
-                                        attentions=[0, 0, 0, 0, 0, 1, 1, 1, 1],
-                                        cross_attentions=[0, 0, 0, 1, 1, 1, 1, 1, 1],
-                                        attention_heads=12,
-                                        attention_features=64,
-                                        diffusion_t=VDiffusion,
-                                        sampler_t=VSampler,
-                                        embedding_features=train_dataset.latent_length,
-                                        embedding_max_length=train_dataset.latent_length,
-                                        use_embedding_cfg=True,
-                                        num_latents=train_dataset.latent_length
-        )
+        model = RAVELDConditioningModel(train_dataset.latent_dims, train_dataset.latent_length)
     else:
-        model = LightningDiffusionModel(
-            net_t=UNetV0,
-            in_channels=train_dataset.latent_dims,
-            channels=[256, 256, 256, 256, 512, 512, 512, 768, 768],
-            factors=[1, 4, 4, 4, 2, 2, 2, 2, 2],
-            items=[1, 2, 2, 2, 2, 2, 2, 4, 4],
-            attentions=[0, 0, 0, 0, 0, 1, 1, 1, 1],
-            attention_heads=12,
-            attention_features=64,
-            diffusion_t=VDiffusion,
-            sampler_t=VSampler,
-            num_latents=train_dataset.latent_length
-        )
+        model = RAVELDModel(train_dataset.latent_dims, train_dataset.latent_length)
 
     # print("Model Architecture:")
     # print(model)

@@ -2,7 +2,7 @@ import torch
 from torch import optim
 import pytorch_lightning as pl
 
-from audio_diffusion_pytorch import VDiffusion, VSampler
+from audio_diffusion_pytorch import UNetV0, VDiffusion, VSampler
 from audio_diffusion_pytorch.utils import groupby
 
 from typing import Callable
@@ -30,9 +30,10 @@ class LightningDiffusionModel(pl.LightningModule):
         self.diffusion = diffusion_t(net=self.net, loss_fn=loss_fn, **diffusion_kwargs)
         self.sampler = sampler_t(net=self.net, **sampler_kwargs)
 
+        self.latent_length = num_latents
         self.finetune = finetune
         self.scheduler_steps = scheduler_steps
-        self.conditioning = kwargs['embedding_features'] is not None
+        self.conditioning = 'embedding_features' in kwargs
         # self.example_input_array = torch.zeros((1, kwargs['in_channels'], num_latents))
 
     def forward(self, *args, **kwargs) -> Tensor:
@@ -71,3 +72,38 @@ class LightningDiffusionModel(pl.LightningModule):
         self.log("val_loss", loss)
         return loss
 
+
+def RAVELDModel(latent_dims, latent_length):
+    return LightningDiffusionModel(
+        net_t=UNetV0,
+        in_channels=latent_dims,
+        channels=[256, 256, 256, 256, 512, 512, 512, 768, 768],
+        factors=[1, 4, 4, 4, 2, 2, 2, 2, 2],
+        items=[1, 2, 2, 2, 2, 2, 2, 4, 4],
+        attentions=[0, 0, 0, 0, 0, 1, 1, 1, 1],
+        attention_heads=12,
+        attention_features=64,
+        diffusion_t=VDiffusion,
+        sampler_t=VSampler,
+        num_latents=latent_length
+    )
+
+
+def RAVELDConditioningModel(latent_dims, latent_length):
+    return LightningDiffusionModel(
+        net_t=UNetV0,
+        in_channels=latent_dims,
+        channels=[256, 256, 256, 256, 512, 512, 512, 768, 768],
+        factors=[1, 4, 4, 4, 2, 2, 2, 2, 2],
+        items=[1, 2, 2, 2, 2, 2, 2, 4, 4],
+        attentions=[0, 0, 0, 0, 0, 1, 1, 1, 1],
+        cross_attentions=[0, 0, 0, 1, 1, 1, 1, 1, 1],
+        attention_heads=12,
+        attention_features=64,
+        diffusion_t=VDiffusion,
+        sampler_t=VSampler,
+        num_latents=latent_length,
+        embedding_features=latent_length,
+        embedding_max_length=latent_length,
+        use_embedding_cfg=True,
+    )

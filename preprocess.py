@@ -54,8 +54,6 @@ def encode_latents(rave, audio, max_chunk_size, normalize_latents=False):
         latents = None
         for chunk in tqdm(x, desc="Encoding file with RAVE", leave=False):
             chunk = chunk.reshape(1, 1, -1)
-            if device.type != 'cpu':
-                chunk = chunk.to(device)
             z = rave.encode(chunk)[0]
             if device.type != 'cpu':
                 z = z.cpu()
