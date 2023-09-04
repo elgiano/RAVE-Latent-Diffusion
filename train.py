@@ -135,7 +135,7 @@ def main():
                                      auto_insert_metric_name=True,
                                      filename='best-{epoch:02d}-{val_loss:.2f}'
                                      ),
-        pl.callbacks.ModelCheckpoint(monitor="global_step",
+        pl.callbacks.ModelCheckpoint(monitor="epoch",
                                      every_n_epochs=args.save_interval,
                                      auto_insert_metric_name=True,
                                      ),
