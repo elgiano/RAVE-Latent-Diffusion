@@ -54,7 +54,7 @@ def encode_latents(rave, audio, max_chunk_size, normalize_latents=False):
         latents = None
         for chunk in tqdm(x, desc="Encoding file with RAVE", leave=False):
             chunk = chunk.reshape(1, 1, -1)
-            z = rave.encode(chunk)[0]
+            z = rave.encode(chunk.to(device))[0]
             if device.type != 'cpu':
                 z = z.cpu()
             # z = torch.nn.functional.pad(z, (0, latent_length - z.shape[2]))
