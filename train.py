@@ -128,11 +128,17 @@ def main():
         print("Selected GPU:", devices)
 
     callbacks = [
-        pl.callbacks.ModelCheckpoint(
-            monitor="val_loss",
-            save_last=True,
-            every_n_epochs=args.save_interval
-        ),
+        pl.callbacks.ModelCheckpoint(monitor="val_loss",
+                                     save_last=True,
+                                     save_top_k=1,
+                                     every_n_epochs=1,
+                                     auto_insert_metric_name=True,
+                                     filename='best-{epoch:02d}-{val_loss:.2f}'
+                                     ),
+        pl.callbacks.ModelCheckpoint(monitor="global_step",
+                                     every_n_epochs=args.save_interval,
+                                     auto_insert_metric_name=True,
+                                     ),
     ]
 
     logger = pl.loggers.TensorBoardLogger(save_out_path, name=args.name)
