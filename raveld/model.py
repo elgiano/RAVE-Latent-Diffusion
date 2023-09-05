@@ -35,6 +35,7 @@ class LightningDiffusionModel(pl.LightningModule):
         self.scheduler_steps = scheduler_steps
         self.conditioning = 'embedding_features' in kwargs
         # self.example_input_array = torch.zeros((1, kwargs['in_channels'], num_latents))
+        self.save_hyperparameters()
 
     def forward(self, *args, **kwargs) -> Tensor:
         return self.diffusion(*args, **kwargs)
