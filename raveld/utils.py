@@ -23,10 +23,10 @@ def read_latent_folder(latent_folder, latent_length):
     latent_files = [path.join(latent_folder, f)
                     for f in listdir(latent_folder) if f.endswith(".npy")]
     assert len(latent_files) > 0, f"no latent files found in '{latent_folder}'"
+    # sort by ctime to align latent and conditioning files
+    latent_files.sort(key=lambda x: path.getctime(x))
     latent_data = [read_latents(p, latent_length) for p in latent_files]
     latent_dims = set(z[0].shape[0] for z in latent_data)
     msg = f"latent files in '{latent_folder}' have different latent dims: {latent_dims}"
     assert len(latent_dims) == 1, msg
     return latent_data
-
-
