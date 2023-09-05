@@ -146,13 +146,13 @@ def main():
 
     if checkpoint_path is not None:
         print(f"Resuming training from: {checkpoint_path}\n")
-        try:
-            model = LightningDiffusionModel.load_from_checkpoint(checkpoint_path)
-        except TypeError:
-            cls = RAVELDConditioningModel if conditioning else RAVELDModel
-            model = cls(latent_dims, latent_length)
-            state_dict = torch.load(checkpoint_path)["state_dict"]
-            model.load_state_dict(state_dict)
+        # try:
+        model = LightningDiffusionModel.load_from_checkpoint(checkpoint_path)
+        # except TypeError:
+        #     cls = RAVELDConditioningModel if conditioning else RAVELDModel
+        #     model = cls(latent_dims, latent_length)
+        #     state_dict = torch.load(checkpoint_path)["state_dict"]
+        #     model.load_state_dict(state_dict)
 
         # is checkpoint compatible with dataset?
         # msg = f"checkpoint latent_dims ({model.in_channels}) doesn't match dataset ({latent_dims})"
@@ -200,7 +200,6 @@ def main():
     # train
 
     trainer = pl.Trainer(
-        resume_from_checkpoint=checkpoint_path,
         max_epochs=args.max_epochs,
         accumulate_grad_batches=args.accumulation_steps,
         logger=logger,
@@ -209,7 +208,7 @@ def main():
         callbacks=callbacks
     )
 
-    trainer.fit(model, train_data_loader, val_data_loader)
+    trainer.fit(model, train_data_loader, val_data_loader, ckpt_path=checkpoint_path)
 
 
 if __name__ == '__main__':
