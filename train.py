@@ -182,11 +182,12 @@ def main():
                                      save_top_k=1,
                                      every_n_epochs=1,
                                      auto_insert_metric_name=True,
-                                     filename='best-{epoch:02d}-{val_loss:.2f}'
+                                     filename='best-{epoch:02d}-{train_loss:.2f}-{val_loss:.2f}'
                                      ),
-        pl.callbacks.ModelCheckpoint(monitor="epoch",
+        pl.callbacks.ModelCheckpoint(monitor="epoch", mode="max",
                                      every_n_epochs=args.save_interval,
                                      auto_insert_metric_name=True,
+                                     filename='{epoch:02d}-{train_loss:.2f}-{val_loss:.2f}'
                                      ),
     ]
 
