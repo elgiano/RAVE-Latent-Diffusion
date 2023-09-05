@@ -156,7 +156,7 @@ def main():
 
         # is checkpoint compatible with dataset?
         msg = f"checkpoint latent_dims ({model.latent_dims}) doesn't match dataset ({latent_dims})"
-        assert model.latent_dims == latent_dims, msg
+        assert model.in_channels == latent_dims, msg
         msg = f"checkpoint latent_length ({model.latent_length}) doesn't match dataset ({latent_length})"
         assert model.latent_length == latent_length, msg
         if conditioning:
