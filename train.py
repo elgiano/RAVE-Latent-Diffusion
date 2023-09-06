@@ -54,7 +54,7 @@ def parse_args():
                         help="Batch size for training.")
     parser.add_argument("--accumulation_steps", type=int, default=2,
                         help="Number of gradient accumulation steps.")
-    parser.add_argument("--save_interval", type=int, default=50,
+    parser.add_argument("--save_interval", type=int,
                         help="Interval (number of epochs) at which to save the model.")
     parser.add_argument("--finetune", type=bool, default=False,
                         help="Finetune model.")
@@ -155,8 +155,9 @@ def main():
         #     model.load_state_dict(state_dict)
 
         # is checkpoint compatible with dataset?
-        # msg = f"checkpoint latent_dims ({model.in_channels}) doesn't match dataset ({latent_dims})"
-        # assert model.in_channels == latent_dims, msg
+        # model_latent_dims = model.hparams["in_channels"]
+        # msg = f"checkpoint latent_dims ({model_latent_dims}) doesn't match dataset ({latent_dims})"
+        # assert model_latent_dims == latent_dims, msg
         # msg = f"checkpoint latent_length ({model.latent_length}) doesn't match dataset ({latent_length})"
         # assert model.latent_length == latent_length, msg
         # if conditioning:
@@ -185,15 +186,21 @@ def main():
     callbacks = [
         pl.callbacks.ModelCheckpoint(monitor="val_loss",
                                      save_last=True,
-                                     save_top_k=1,
                                      every_n_epochs=1,
-                                     auto_insert_metric_name=True,
                                      filename='best-{epoch:02d}-{train_loss:.2f}-{val_loss:.2f}'
                                      ),
-        pl.callbacks.ModelCheckpoint(every_n_epochs=args.save_interval,
-                                     filename='{epoch:02d}-{train_loss:.2f}-{val_loss:.2f}'
+        pl.callbacks.ModelCheckpoint(monitor="train_loss",
+                                     every_n_epochs=1,
+                                     filename='best-{epoch:02d}-{train_loss:.2f}-{val_loss:.2f}'
                                      ),
     ]
+    if args.save_interval:
+        callbacks.append(
+            pl.callbacks.ModelCheckpoint(every_n_epochs=args.save_interval,
+                                         save_top_k=-1,
+                                         filename='{epoch:02d}-{train_loss:.2f}-{val_loss:.2f}'
+                                         ),
+        )
 
     logger = pl.loggers.TensorBoardLogger(save_out_path, name=args.name)
 
