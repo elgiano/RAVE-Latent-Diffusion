@@ -96,10 +96,10 @@ def main():
         latents = encode_latents(rave, audio,
                                  args.max_chunk_size, args.normalize_latents)
 
-        output_dir = os.path.join(args.latent_folder, relpath)
-        os.makedirs(output_dir, exist_ok=True)
-        output_file = f"{os.path.splitext(os.path.basename(audio_file))[0]}.npy"
-        np.save(os.path.join(output_dir, output_file), latents)
+        out_dir = os.path.join(args.latent_folder, os.path.dirname(relpath))
+        os.makedirs(out_dir, exist_ok=True)
+        out_file = f"{os.path.splitext(os.path.basename(audio_file))[0]}.npy"
+        np.save(os.path.join(out_dir, out_file), latents)
 
     print('Done encoding RAVE latents')
     print('Path to latents:', args.latent_folder)
