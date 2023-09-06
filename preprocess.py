@@ -87,7 +87,8 @@ def main():
 
     pbar = tqdm(audio_files)
     for audio_file in pbar:
-        pbar.set_description(os.path.relpath(audio_file, args.audio_folder))
+        relpath = os.path.relpath(audio_file, args.audio_folder)
+        pbar.set_description(relpath)
 
         audio, _ = librosa.load(os.path.abspath(audio_file),
                                 sr=sample_rate, mono=True)
@@ -95,20 +96,13 @@ def main():
         latents = encode_latents(rave, audio,
                                  args.max_chunk_size, args.normalize_latents)
 
-        output_file = get_hashed_name(audio_file)
-        np.save(os.path.join(args.latent_folder, output_file), latents)
+        output_dir = os.path.join(args.latent_folder, relpath)
+        os.makedirs(output_dir, exist_ok=True)
+        output_file = f"{os.path.splitext(os.path.basename(audio_file))[0]}.npy"
+        np.save(os.path.join(output_dir, output_file), latents)
 
     print('Done encoding RAVE latents')
     print('Path to latents:', args.latent_folder)
-
-
-# hash dirname to avoid conflicts between same filenames in different dirs
-def get_hashed_name(audio_file):
-    base_name = os.path.splitext(os.path.basename(audio_file))[0]
-    hasher = hashlib.new('md5')
-    hasher.update(os.path.dirname(audio_file).encode())
-    dir_hash = hasher.hexdigest()
-    return f"{dir_hash}_{base_name}.npy"
 
 
 if __name__ == "__main__":
