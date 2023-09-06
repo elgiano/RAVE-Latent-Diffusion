@@ -16,6 +16,7 @@ import random
 
 from raveld.model import LightningDiffusionModel, RAVELDModel, RAVELDConditioningModel
 from raveld.utils import read_latent_folder
+from raveld.rave_data import RAVEDataModule
 
 
 class RaveDataset(torch.utils.data.Dataset):
@@ -114,46 +115,20 @@ def main():
     conditioning = self_cond or cond_folder
 
     # load datasets
-    latent_data = read_latent_folder(latent_folder, latent_length)
-    print(f"Read {len(latent_data)} latent files in {latent_folder}")
-    latent_dims = latent_data[0][0].shape[0]
+    data = RAVEDataModule(latent_length, latent_folder,
+                          cond_folder, args.self_conditioning,
+                          split_ratio, split_files,
+                          batch_size, num_workers)
 
-    if conditioning:
-        if cond_folder:
-            # read conditioning data
-            cond_data = read_latent_folder(cond_folder, latent_length)
-            print(f"Read {len(cond_data)} conditioning latent files in {cond_folder}")
-        elif args.self_conditioning:
-            # cond_data is shifted latents
-            cond_data = [(torch.zeros_like(z[0]),) + z[:-1] for z in latent_data]
-        # zip (x,c) for each window for each file
-        latent_data = [list(zip(x, c)) for x, c in zip(latent_data, cond_data)]
-
-    # split train-val
-    train_data, val_data = split_train_val(latent_data, split_ratio, split_files)
-    train_dataset = RaveDataset(tuple(train_data))
-    val_dataset = RaveDataset(tuple(val_data))
-
-    train_data_loader = DataLoader(train_dataset, batch_size, shuffle=True,
-                                   num_workers=num_workers, pin_memory=True)
-    val_data_loader = DataLoader(val_dataset, batch_size, shuffle=False,
-                                 num_workers=num_workers, pin_memory=True)
-
-    print(f"Training: {len(train_dataset)} sequences")
-    print(f"Validation: {len(val_dataset)} sequences")
+    latent_dims = data.latent_dims
+    # print(f"Training: {len(train_dataset)} sequences")
+    # print(f"Validation: {len(val_dataset)} sequences")
 
     # make model
 
     if checkpoint_path is not None:
         print(f"Resuming training from: {checkpoint_path}\n")
-        # try:
         model = LightningDiffusionModel.load_from_checkpoint(checkpoint_path)
-        # except TypeError:
-        #     cls = RAVELDConditioningModel if conditioning else RAVELDModel
-        #     model = cls(latent_dims, latent_length)
-        #     state_dict = torch.load(checkpoint_path)["state_dict"]
-        #     model.load_state_dict(state_dict)
-
         # is checkpoint compatible with dataset?
         # model_latent_dims = model.hparams["in_channels"]
         # msg = f"checkpoint latent_dims ({model_latent_dims}) doesn't match dataset ({latent_dims})"
@@ -215,7 +190,7 @@ def main():
         callbacks=callbacks
     )
 
-    trainer.fit(model, train_data_loader, val_data_loader, ckpt_path=checkpoint_path)
+    trainer.fit(model, datamodule=data, ckpt_path=checkpoint_path)
 
 
 if __name__ == '__main__':
